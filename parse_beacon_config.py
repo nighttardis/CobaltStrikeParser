@@ -379,7 +379,16 @@ class cobaltstrikeConfig:
     def decode_config(cfg_blob, version):
         return bytes([cfg_offset ^ confConsts.XORBYTES[version] for cfg_offset in cfg_blob])
 
-    def _parse_config(self, version, quiet=False, as_json=False):
+
+    @staticmethod
+    def byte_swap(full_config_data):
+        tmp = bytearray(confConsts.CONFIG_SIZE)
+        for i in range(0, confConsts.CONFIG_SIZE//2, 2):
+            tmp[i] = full_config_data[(i-1) % confConsts.CONFIG_SIZE]
+            tmp[(i-1) % confConsts.CONFIG_SIZE] = full_config_data[i]
+        return tmp
+
+    def _parse_config(self, version, quiet=False, as_json=False, byteswap=False):
         '''
         Parses beacon's configuration from beacon PE or memory dump.
         Returns json of config is found; else it returns None.
@@ -397,14 +406,30 @@ class cobaltstrikeConfig:
         decoded_config_offset = re_start_decoded_match.start() if re_start_decoded_match else -1
         
         if encoded_config_offset >= 0:
-            full_config_data = cobaltstrikeConfig.decode_config(self.data[encoded_config_offset : encoded_config_offset + confConsts.CONFIG_SIZE], version=version)
+            full_config_data = cobaltstrikeConfig.decode_config(self.data[encoded_config_offset: encoded_config_offset + confConsts.CONFIG_SIZE], version=version)
         else:
-            full_config_data = self.data[decoded_config_offset : decoded_config_offset + confConsts.CONFIG_SIZE]
+            full_config_data = self.data[decoded_config_offset: decoded_config_offset + confConsts.CONFIG_SIZE]
 
         parsed_config = {}
         settings = BeaconSettings(version).settings.items()
         for conf_name, packed_conf in settings:
-            parsed_setting = packed_conf.pretty_repr(full_config_data)
+            if conf_name == 'BeaconType' and byteswap:
+                parsed_setting = packed_conf.pretty_repr(full_config_data)
+                if parsed_setting == "Not Found":
+                    _cli_print("{: <{width}} - {val}".format(conf_name, width=COLUMN_WIDTH-3,
+                                                             val=f"{parsed_setting}, attempting byte swapping"))
+                    tmp = self.byte_swap(full_config_data=full_config_data)
+                    parsed_setting = packed_conf.pretty_repr(tmp)
+                    if parsed_setting == "Not Found" or \
+                            (len(parsed_setting) == 1 and parsed_setting[0] not in BeaconSettings.BEACON_TYPE.values()):
+                        _cli_print("{: <{width}} - {val}".format(conf_name, width=COLUMN_WIDTH - 3,
+                                                                 val=f"{parsed_setting}, byte swapping didn't appear to work."))
+                    else:
+                        _cli_print("{: <{width}} - {val}".format(conf_name, width=COLUMN_WIDTH - 3,
+                                                                 val=f"{parsed_setting}, byte swapping appears to have worked."))
+                        full_config_data = tmp
+            else:
+                parsed_setting = packed_conf.pretty_repr(full_config_data)
 
             parsed_config[conf_name] = parsed_setting
             if as_json:
@@ -422,7 +447,7 @@ class cobaltstrikeConfig:
                     continue
                 _cli_print("{: <{width}} - {val}".format(conf_name, width=COLUMN_WIDTH-3, val=parsed_setting))
             
-            elif parsed_setting == []:
+            elif not parsed_setting:
                 if quiet:
                     continue
                 _cli_print("{: <{width}} - {val}".format(conf_name, width=COLUMN_WIDTH-3, val='Empty'))
@@ -452,7 +477,7 @@ class cobaltstrikeConfig:
 
         return parsed_config
 
-    def parse_config(self, version=None, quiet=False, as_json=False):
+    def parse_config(self, version=None, quiet=False, as_json=False, byteswap=False):
         '''
         Parses beacon's configuration from beacon PE or memory dump
         Returns json of config is found; else it returns None.
@@ -464,11 +489,11 @@ class cobaltstrikeConfig:
 
         if not version:
             for ver in SUPPORTED_VERSIONS:
-                parsed = self._parse_config(version=ver, quiet=quiet, as_json=as_json)
+                parsed = self._parse_config(version=ver, quiet=quiet, as_json=as_json, byteswap=byteswap)
                 if parsed:
                     return parsed
         else:
-            return self._parse_config(version=version, quiet=quiet, as_json=as_json)
+            return self._parse_config(version=version, quiet=quiet, as_json=as_json, byteswap=byteswap)
         return None
 
 
@@ -476,7 +501,7 @@ class cobaltstrikeConfig:
         self.data = decrypt_beacon(self.data)
         return self.parse_config(version=version, quiet=quiet, as_json=as_json)
 
-    def parse_encrypted_config(self, version=None, quiet=False, as_json=False):
+    def parse_encrypted_config(self, version=None, quiet=False, as_json=False, byteswap=False):
         '''
         Parses beacon's configuration from stager dll or memory dump
         Returns json of config is found; else it returns None.
@@ -520,7 +545,7 @@ class cobaltstrikeConfig:
 
         dec_data = bytes(dec_data)
         self.data = dec_data
-        return self.parse_config(version=version, quiet=quiet, as_json=as_json)
+        return self.parse_config(version=version, quiet=quiet, as_json=as_json, byteswap=byteswap)
 
 
 if __name__ == '__main__':
@@ -529,11 +554,12 @@ if __name__ == '__main__':
     parser.add_argument("--json", help="Print as json", action="store_true", default=False)
     parser.add_argument("--quiet", help="Do not print missing or empty settings", action="store_true", default=False)
     parser.add_argument("--version", help="Try as specific cobalt version (3 or 4). If not specified, tries both.", type=int)
+    parser.add_argument("--byteswap", help="Attempt to preform byte swaps", action="store_true", default=False)
     args = parser.parse_args()
 
     if os.path.isfile(args.beacon):
-        if cobaltstrikeConfig(args.beacon).parse_config(version=args.version, quiet=args.quiet, as_json=args.json) or \
-        cobaltstrikeConfig(args.beacon).parse_encrypted_config(version=args.version, quiet=args.quiet, as_json=args.json):
+        if cobaltstrikeConfig(args.beacon).parse_config(version=args.version, quiet=args.quiet, as_json=args.json, byteswap=args.byteswap) or \
+        cobaltstrikeConfig(args.beacon).parse_encrypted_config(version=args.version, quiet=args.quiet, as_json=args.json, byteswap=args.byteswap):
             exit(0)
 
     elif args.beacon.lower().startswith('http'):
@@ -544,8 +570,8 @@ if __name__ == '__main__':
             exit(1)
 
         conf_data = x86_beacon_data or x64_beacon_data
-        if cobaltstrikeConfig(BytesIO(conf_data)).parse_config(version=args.version, quiet=args.quiet, as_json=args.json) or \
-        cobaltstrikeConfig(BytesIO(conf_data)).parse_encrypted_config(version=args.version, quiet=args.quiet, as_json=args.json):
+        if cobaltstrikeConfig(BytesIO(conf_data)).parse_config(version=args.version, quiet=args.quiet, as_json=args.json, byteswap=args.byteswap) or \
+        cobaltstrikeConfig(BytesIO(conf_data)).parse_encrypted_config(version=args.version, quiet=args.quiet, as_json=args.json, byteswap=args.byteswap):
             exit(0)
 
     print("[-] Failed to find any beacon configuration")

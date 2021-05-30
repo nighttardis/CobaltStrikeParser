@@ -1,18 +1,20 @@
 # CobaltStrikeParser
-Python parser for CobaltStrike Beacon's configuration
+Forked from https://github.com/Sentinel-One/CobaltStrikeParser
+
+Python parser for CobaltStrike Beacon's configuration, supports limited byte swapping to decode the configuration. 
 
 ## Description
 Use `parse_beacon_config.py` for stageless beacons, memory dumps or C2 urls with metasploit compatibility mode (default true).  
 Many stageless beacons are PEs where the beacon code itself is stored in the `.data` section and xored with 4-byte key.  
 The script tries to find the xor key and data heuristically, decrypt the data and parse the configuration from it.
 
-This is designed so it can be used as a library too.
+This is designed, so it can be used as a library too.
 
-The repo now also includes a small commuincation module (comm.py) that can help with communcating to a C2 server as a beacon.  
+The repo now also includes a small communication module (comm.py) that can help with communicating to a C2 server as a beacon.  
 
 ## Usage
 ```
-usage: parse_beacon_config.py [-h] [--json] [--quiet] [--version VERSION] beacon
+usage: parse_beacon_config.py [-h] [--json] [--quiet] [--version VERSION] [--byteswap] beacon
 
 Parses CobaltStrike Beacon's configuration from PE, memory dump or URL.
 
@@ -24,6 +26,7 @@ optional arguments:
   --json             Print as json
   --quiet            Do not print missing or empty settings
   --version VERSION  Try as specific cobalt version (3 or 4). If not specified, tries both.
+  --byteswap         Try a byteswap if decoding doesn't make sense
 ```
 
 ## Extra
